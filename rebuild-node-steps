@@ -1,0 +1,58 @@
+#!/usr/bin/bash
+oc delete node perf150
+
+ipmitool -I lanplus -H perf150-drac.perf.lab.eng.bos.redhat.com -U root -P 100yard- chassis bootdev pxe
+ipmitool -I lanplus -H perf150-drac.perf.lab.eng.bos.redhat.com -U root -P 100yard- chassis power cycle
+
+count=2
+while ((count > 0)); do
+  echo "waiting for Pending csr"
+  if oc get csr | grep Pending; then
+    csr=$(oc get csr | grep Pending | awk '{print$1}')
+    oc adm certificate approve $csr
+    ((count--))
+  fi
+  sleep 5
+done
+
+while oc get nodes | egrep "perf150 *NotReady"; do
+  sleep 5
+done
+
+> /root/.ssh/known_hosts
+exit 0
+
+#oc label machineconfigpool worker worker-rt=""
+sleep 1m
+oc apply -f 05-kubeletconfig-worker-rt.yaml
+sleep 3m
+oc label node perf150 node-role.kubernetes.io/worker-rt=""
+
+sshOpt="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+sudo mkdir -p /etc/yum.repos.d
+sudo cat > /etc/yum.repos.d/rhel-8-1.repo << 'EOF'
+[baseos]
+baseurl=http://download-node-02.eng.bos.redhat.com/rhel-8/nightly/RHEL-8/latest-RHEL-8.1.1/compose/BaseOS/$basearch/os
+gpgcheck=0
+
+[appstream]
+baseurl=http://download-node-02.eng.bos.redhat.com/rhel-8/nightly/RHEL-8/latest-RHEL-8.1.1/compose/AppStream/$basearch/os
+gpgcheck=0
+
+[rt]
+baseurl=http://download-node-02.eng.bos.redhat.com/rhel-8/nightly/RHEL-8/latest-RHEL-8.1.1/compose/RT/$basearch/os
+gpgcheck=0
+EOF
+
+sudo rpm-ostree override replace http://file.rdu.redhat.com/~walters/microcode_ctl-20190918-3.rhcos.1.el8.x86_64.rpm
+
+sudo pivot quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:6e1ffc63d4eaefc52f9b70c70e6f07226e1030e33eba25b8cf25410a432699bd
+
+sudo systemctl reboot
+
+sudo rpm-ostree override remove kernel{,-core,-modules,-modules-extra} --install http://download.eng.bos.redhat.com/brewroot/vol/rhel-8/packages/kernel-rt/4.18.0/147.3.1.rt24.96.el8_1/x86_64/kernel-rt-core-4.18.0-147.3.1.rt24.96.el8_1.x86_64.rpm --install http://download.eng.bos.redhat.com/brewroot/vol/rhel-8/packages/kernel-rt/4.18.0/147.3.1.rt24.96.el8_1/x86_64/kernel-rt-modules-4.18.0-147.3.1.rt24.96.el8_1.x86_64.rpm --install http://download.eng.bos.redhat.com/brewroot/vol/rhel-8/packages/kernel-rt/4.18.0/147.3.1.rt24.96.el8_1/x86_64/kernel-rt-modules-extra-4.18.0-147.3.1.rt24.96.el8_1.x86_64.rpm
+
+sudo systemctl reboot
+
+
