@@ -1,0 +1,4 @@
+DEVICE=eno3
+BOOTPROTO=none
+ONBOOT=no
+

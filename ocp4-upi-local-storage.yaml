@@ -1,0 +1,24 @@
+apiVersion: local.storage.openshift.io/v1
+kind: LocalVolume
+metadata:
+  name: local-storage-osd
+  namespace: openshift-storage
+spec:
+  storageClassDevices:
+    - devicePaths:
+        - /dev/sdb
+      storageClassName: local-osd
+      volumeMode: Block
+---
+apiVersion: local.storage.openshift.io/v1
+kind: LocalVolume
+metadata:
+  name: local-storage-mon
+  namespace: openshift-storage
+spec:
+  storageClassDevices:
+    - devicePaths:
+        - /dev/sdc
+      storageClassName: local-mon
+      volumeMode: Filesystem
+      fsType: xfs

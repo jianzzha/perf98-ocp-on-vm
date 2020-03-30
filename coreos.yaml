@@ -1,0 +1,35 @@
+---
+storage:
+  disks:
+  - device: /dev/sda
+    wipe_table: true
+    partitions:
+    - label: ROOT
+  filesystems:
+  - mount:
+      device: /dev/disk/by-partlabel/ROOT
+      format: ext4
+      wipe_filesystem: true
+      label: ROOT
+  files:
+    - path: /etc/systemd/system.conf
+      filesystem: root
+      contents:
+        inline: |
+          [Manager]
+          CPUAffinity=0 2
+      mode: 0644
+    - path: /etc/sysconfig/network-scripts/ifcfg-eno3
+      filesystem: root
+      contents:
+        inline: |
+          DEVICE=eno3
+          BOOTPROTO=none
+          ONBOOT=no
+      mode: 0644
+passwd:
+    users:
+      - name: core
+        password_hash: "$1$IA6LGi47$jcq7/fa6Df0l4wXaTuoEt/"
+        ssh_authorized_keys:
+          -  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDJwpDAxKiRjiWWB0iPTL+HSsz6FO7VkJtLGoZJGVYc+DF5TGrHjCilqAPkMRprbPqpkVERxLo/+1CqdLFuiQA6AqUHHRnpxJmvXAUh7H98uUZ7Y5esIZT/BoiEgLGHDFcw7+c1pDUa8kLs2oQuAXHJd27e86OjvTEjKLMc2XJzappV30AeF2zCbr7mUkBVmfOs9u1sYJ+O0zR1Vx8TcHoOGv4a+zzBTLC9r1z+GolO0BnEwvDGHtHtjJ0iRCjI5l3PBnBun2GdHcwRIN7ugEZqOrO5I3iUvJCLoRbUOnu04YlgE9t7RagLsNciJpuX/2FkXfOT3H9oky6QLIbMcWgB root@perf98.perf.lab.eng.bos.redhat.com"
