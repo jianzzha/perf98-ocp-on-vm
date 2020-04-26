@@ -149,7 +149,7 @@ EOF
         OIF=${oif} envsubst < ${SCRIPTPATH}/ocp4-upi-dnsmasq.conf > /etc/dnsmasq.conf
     fi
     
-    cat ~/ocp4-upi-haproxy.cfg > /etc/haproxy/haproxy.cfg
+    cat ${SCRIPTPATH}/ocp4-upi-haproxy.cfg > /etc/haproxy/haproxy.cfg
     sed -i s/Listen\ 80/Listen\ 81/ /etc/httpd/conf/httpd.conf
     mkdir /var/www/html/ocp4-upi
 
