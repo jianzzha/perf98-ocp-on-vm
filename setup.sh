@@ -62,8 +62,10 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
 
     echo "download filetranspile"
     [ -d ~/bin ] || mkdir ~/bin
-    wget -O ~/bin/filetranspile https://raw.githubusercontent.com/ashcrow/filetranspiler/master/filetranspile
+    wget -O ~/bin/filetranspile https://raw.githubusercontent.com/ashcrow/filetranspiler/18/filetranspile
     chmod u+x ~/bin/filetranspile
+    echo "pip install modules for filetranspile"
+    pip3 install PyYAML
  
     echo "install docker"
     if ! yum install -y podman; then
@@ -134,8 +136,8 @@ EOF
     iptables -X
     iptables -F -t nat
     iptables -X -t nat
-    oif=$(ip route | awk '/^default/ {print $NF}')
-    iptables -t nat -A POSTROUTING -s 192.168.222.0/24 ! -d 192.168.222.0/24 -o $oif -j MASQUERADE
+    oif=$(ip route | sed -n -r 's/^default.* dev (\w+).*/\1/p')
+    iptables -t nat -A POSTROUTING -s 192.168.222.0/24 ! -d 192.168.222.0/24 -o $(echo $oif | awk '{print $1}') -j MASQUERADE
     
     echo "set up /etc/resolv.conf"
     sed -i 's/^search.*/search test.myocp4.com/' /etc/resolv.conf
@@ -151,7 +153,9 @@ EOF
         ssh-keygen -f ~/.ssh/id_rsa -q -N ""
     fi
     pub_key_content=`cat ~/.ssh/id_rsa.pub`
-    sed -i -r -e "s/sshKey:.*/sshKey: ${pub_key_content}/" ${SCRIPTPATH}/install-config.yaml
+    sed -i -r -e "s|sshKey:.*|sshKey: ${pub_key_content}|" ${SCRIPTPATH}/install-config.yaml
+
+    systemctl enable --now haproxy httpd dnsmasq
 
     DOWNLOAD_IMAGE="true"
 fi
