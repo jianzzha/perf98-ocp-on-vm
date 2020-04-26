@@ -1,29 +1,143 @@
 #!/usr/bin/env bash
+VERSION=${VERSION:-"4.3.0-0.nightly-2020-02-06-155513"}
+installerURL=${installerURL:-"https://raw.githubusercontent.com/openshift/installer/release-4.3/data/data/rhcos.json"}
+INSTALL_BAREMETAL=${INSTALL_BAREMETAL:-false}
+USE_ALIAS=${USE_ALIAS:-false}
+IPMI_IP=mgmt-e26-h29-740xd.alias.bos.scalelab.redhat.com
+IPMI_USER=quads
+IPMI_PASSWD=504322
+IPMI_PXE_DEVICE=NIC.Integrated.1-1-1
+BM_IF=${BM_IF:-eno1}
 
-if false; then
-echo "disable firewalld and selinux"
-systemctl disable --now firewalld
-setenforce 0
+MAC_BAREMETAL=52:54:00:f9:8e:00
 
-echo "after disable firewalld, restart libvirt"
-systemctl restart libvirtd
+SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
-echo "setup libvirt network ocp4-upi"
-virsh net-define ocp4-upi-net.xml
-virsh net-autostart ocp4-upi
-virsh net-start ocp4-upi
+if [[ "${FROM_TOP:-false}" == "true" ]]; then
+    if [[ "${USE_ALIAS}" == "true" ]]; then
+        ~/clean-interfaces.sh --nuke
+    fi
+
+    set -ex
+    yum -y groupinstall 'Virtualization Host'
+    yum -y install ipmitool wget virt-install jq python3 httpd syslinux-tftpboot haproxy httpd virt-install vim-enhanced git tmux
+    set +ex
+
+    echo "install docker"
+    if ! yum install -y podman; then
+        yum install -y yum-utils device-mapper-persistent-data lvm2
+        yum-config-manager --add-repo   https://download.docker.com/linux/centos/docker-ce.repo
+        yum update -y && yum install -y   containerd.io-1.2.13   docker-ce-19.03.8   docker-ce-cli-19.03.8
+        mkdir /etc/docker
+        cat > /etc/docker/daemon.json <<EOF
+{
+  "iptables": false,
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m"
+  },
+  "storage-driver": "overlay2",
+  "storage-opts": [
+    "overlay2.override_kernel_check=true"
+  ]
+}
+EOF
+        mkdir -p /etc/systemd/system/docker.service.d
+        systemctl daemon-reload
+        systemctl enable --now docker
+    fi
+
+    nmcli con add type bridge ifname baremetal con-name baremetal ipv4.method manual ipv4.addr 192.168.222.1/24 ipv4.dns 192.168.222.1 ipv4.dns-priority 10 autoconnect yes bridge.stp no
+    nmcli con reload baremetal
+    nmcli con up baremetal
+
+    if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
+        git clone https://github.com/dell/iDRAC-Redfish-Scripting.git ~/Redfish
+        pushd ~/Redfish/"Redfish Python"/
+        MAC_BAREMETAL=`python GetEthernetInterfacesREDFISH.py -u ${IPMI_USER} -p {IPMI_PASSWD} -ip ${IPMI_IP} -d {IPMI_PXE_DEVICE} | awk '/^MACAddress:/{print $2}'`   
+        popd
+        nmcli con down $BM_IF
+        nmcli con del $BM_IF
+        nmcli con add type bridge-slave autoconnect yes con-name $BM_IF ifname $BM_IF master baremetal
+        nmcli con reload $BM_IF
+        nmcli con up $BM_IF
+    fi
+    
+    echo "disable firewalld and selinux"
+    systemctl disable --now firewalld
+    setenforce 0
+    sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+    
+    echo "after disable firewalld, restart libvirt"
+    systemctl restart libvirtd
+    
+    echo "disable libvirt default network"
+    if virsh net-list | grep default; then
+        virsh net-destroy default
+        virsh net-undefine default
+    fi
+    
+    echo "setup libvirt network ocp4-upi"
+    if ! virsh net-list | grep ocp4-upi; then
+        virsh net-define ocp4-upi-net.xml
+        virsh net-autostart ocp4-upi
+        virsh net-start ocp4-upi
+    fi
+    
+    echo "set up iptables"
+    iptables -F
+    iptables -X
+    iptables -F -t nat
+    iptables -X -t nat
+    oif=$(ip route | awk '/^default/ {print $NF}')
+    iptables -t nat -A POSTROUTING -s 192.168.222.0/24 ! -d 192.168.222.0/24 -o $oif -j MASQUERADE
+    
+    echo "set up /etc/resolv.conf"
+    sed -i 's/^search.*/search test.myocp4.com/' /etc/resolv.conf
+    if ! grep 192.168.222.1 /etc/resolv.conf; then
+        sed -i '/^search/a nameserver\ 192.168.222.1' /etc/resolv.conf
+    fi
+
+    if [[ -f ${SCRIPTPATH}/ocp4-upi-dnsmasq.conf ]]; then
+        OIF=${oif} envsubst < ${SCRIPTPATH}/ocp4-upi-dnsmasq.conf >> /etc/dnsmasq.conf
+    fi
+
+    if ! [[ -f ~/.ssh/id_rsa ]]; then
+        ssh-keygen -f /root/.ssh/id_rsa -q -N ""
+    fi
+    pub_key_content=`cat id_rsa.pub`
+    sed -i -r -e "s/sshKey:.*/sshKey: ${pub_key_content}/" ${SCRIPTPATH}/install-config.yaml
+
+    DOWNLOAD_IMAGE="true"
 fi
-iptables -F
-iptables -X
-iptables -F -t nat
-iptables -X -t nat
-oif=$(ip route | awk '/^default/ {print $NF}')
-iptables -t nat -A POSTROUTING -s 192.168.222.0/24 ! -d 192.168.222.0/24 -o $oif -j MASQUERADE
 
-sed -i 's/^search.*/search test.myocp4.com/' /etc/resolv.conf
-sed -i '/^search/a nameserver\ 192.168.222.1' /etc/resolv.conf
+if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
+    echo "download images"
 
-./cleanup.sh
+    /bin/rm -rf ~/openshift-client-linux*
+    /bin/rm -rf /var/www/html/ocp4-upi/rhcos*
+
+    wget -N -P https://mirror.openshift.com/pub/openshift-v4/clients/ocp-dev-preview/${VERSION}/{openshift-client-linux-${VERSION}.tar.gz,openshift-install-linux-${VERSION}.tar.gz}
+    [ -d ~/bin ] || mkdir ~/bin
+    /bin/rm -rf ~/bin/{kubectl,oc,openshift*}
+    tar -C ~/bin -xzf ~/openshift-client-linux-${VERSION}.tar.gz 
+
+    baseURI=`curl -s $installerURL | jq -r '(.baseURI)'`
+    bios=`curl -s $installerURL | jq -r '(.images.metal.path)'`
+    kernel=`curl -s $installerURL | jq -r '(.images.kernel.path)'`
+    initramfs=`curl -s $installerURL | jq -r '(.images.initramfs.path)'`
+    wget -N -P /var/www/html/ocp4-upi $baseURI/{$bios,$kernel,$initramfs}
+    ln -s /var/www/html/ocp4-upi/${bios} /var/www/html/ocp4-upi/rhcos-metal-bios.raw.gz
+    ln -s /var/www/html/ocp4-upi/${initramfs} /var/www/html/ocp4-upi/rhcos-installer-initramfs.img
+    ln -s /var/www/html/ocp4-upi/${kernel} /var/www/html/ocp4-upi/rhcos-installer-kernel
+    chmod a+rx /var/www/html/ocp4-upi
+fi
+
+echo "delete existing VMs"
+if virsh list | grep ocp4-upi; then
+    ./cleanup.sh
+fi
 
 echo "remove exisiting install directory"
 rm -rf  ~/ocp4-upi-install-1
@@ -38,12 +152,24 @@ sed -i s/mastersSchedulable.*/mastersSchedulable:\ False/ manifests/cluster-sche
 echo "create ignition files"
 openshift-install create ignition-configs
 /usr/bin/cp -f *.ign /var/www/html/ocp4-upi
-/usr/bin/cp -f worker.ign /root/ocp-on-vm/
-
 popd
-/usr/bin/rm -f perf150.ign
-ct -i worker.ign -f fix-ign -o perf150.ign
-/usr/bin/cp -f perf150.ign /var/www/html/ocp4-upi
+
+if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
+    echo "set up baremetal server ignition"
+    /usr/bin/cp -f ~/ocp4-upi-install-1/worker.ign ./ 
+    /usr/bin/rm -f baremetal.ign
+    if command -v ct >/dev/null 2>&1 && [[ -d fix-ign ]]; then
+        ct -i worker.ign -f fix-ign -o baremetal.ign
+        /usr/bin/cp -f baremetal.ign /var/www/html/ocp4-upi
+        setup_baremetal="true"
+    else
+        echo "ct not installed or fix-ign directory not exist!"
+        echo "no baremetal ignition file generated!"
+        setup_baremetal="false" 
+    fi
+else
+    setup_baremetal="false"
+fi
 
 echo "start bootstrap VM ..."
 virt-install -n ocp4-upi-bootstrap --pxe --os-type=Linux --os-variant=rhel8.0 --ram=8192 --vcpus=4 --network network=ocp4-upi,mac=52:54:00:f9:8e:41 --disk size=120,bus=scsi,sparse=yes --check disk_size=off --noautoconsole
@@ -104,9 +230,20 @@ while ((count > 0)); do
   sleep 5
 done
 
+if [[ ${setup_baremetal} == "false" ]]; then
+    exit 0
+fi
 
-ipmitool -I lanplus -H perf150-drac.perf.lab.eng.bos.redhat.com -U root -P 100yard- chassis bootdev pxe
-ipmitool -I lanplus -H perf150-drac.perf.lab.eng.bos.redhat.com -U root -P 100yard- chassis power cycle
+echo "update bios pxe device order"
+pushd ~/Redfish/"Redfish Python"/
+python GetBiosBootOrderBootSourceStateREDFISH.py -u ${IPMI_USER} -p ${IPMI_PASSWD} -ip ${IPMI_IP} 
+/bin/cp -f ${SCRIPTPATH}/redfish_update_pxe.py ./
+python redfish_update_pxe.p $IPMI_PXE_DEVICE
+python ChangeBootOrderBootSourceStateREDFISH.py -u ${IPMI_USER} -p ${IPMI_PASSWD} -ip ${IPMI_IP}
+popd
+
+ipmitool -I lanplus -H ${IPMI_IP} -U ${IPMI_USER} -P ${IPMI_PASSWD} chassis bootdev pxe
+ipmitool -I lanplus -H ${IPMI_IP} -U ${IPMI_USER} -P ${IPMI_PASSWD} chassis power cycle
 
 count=2
 while ((count > 0)); do
@@ -116,10 +253,6 @@ while ((count > 0)); do
     oc adm certificate approve $csr
     ((count--))
   fi
-  sleep 5
-done
-
-while oc get nodes | egrep "perf150 *NotReady"; do
   sleep 5
 done
 
