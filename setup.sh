@@ -29,8 +29,9 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
     if ! cat /etc/os-release | egrep 'VERSION="8'; then
         echo "copy extra syslinux files for tftpboot" 
         yum -y unzip
-        mkdir syslinux
-        pushd syslinux
+        /bin/rm -rf ~/syslinux
+        mkdir ~/syslinux
+        pushd ~/syslinux
         wget -O syslinux.zip https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.zip
         unzip syslinux.zip 
         /bin/cp -f ./bios/core/lpxelinux.0 /var/lib/tftpboot/
