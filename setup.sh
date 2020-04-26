@@ -159,8 +159,9 @@ EOF
     pub_key_content=`cat ~/.ssh/id_rsa.pub`
     sed -i -r -e "s|sshKey:.*|sshKey: ${pub_key_content}|" ${SCRIPTPATH}/install-config.yaml
 
-    systemctl enable --now haproxy httpd dnsmasq
-
+    systemctl enable haproxy httpd dnsmasq
+    systemctl restart haproxy httpd dnsmasq
+    
 fi
 
 if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
