@@ -7,7 +7,10 @@ IPMI_IP=mgmt-e26-h29-740xd.alias.bos.scalelab.redhat.com
 IPMI_USER=quads
 IPMI_PASSWD=504322
 IPMI_PXE_DEVICE=NIC.Integrated.1-1-1
+# BM_IF is the linux name for IPMI_PXE_DEVICE
 BM_IF=${BM_IF:-eno1}
+# DISABLE_IFS contains the list of devices to be disabled to prevent dhcp
+DISABLE_IFS=(eno3)
 
 MAC_BAREMETAL=52:54:00:f9:8e:00
 
@@ -20,9 +23,42 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
 
     set -ex
     yum -y groupinstall 'Virtualization Host'
-    yum -y install ipmitool wget virt-install jq python3 httpd syslinux-tftpboot haproxy httpd virt-install vim-enhanced git tmux
+    yum -y install unzip ipmitool wget virt-install jq python3 httpd syslinux-tftpboot haproxy httpd virt-install vim-enhanced git tmux
     set +ex
 
+    if ! cat /etc/os-release | egrep 'VERSION="8'; then
+        echo "copy extra syslinux files for tftpboot" 
+        yum -y unzip
+        mkdir syslinux
+        pushd syslinux
+        wget -O syslinux.zip https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.zip
+        unzip syslinux.zip 
+        /bin/cp -f ./bios/core/lpxelinux.0 /var/lib/tftpboot/
+        /bin/cp -f ./bios/com32/elflink/ldlinux/ldlinux.c32 /var/lib/tftpboot/
+        popd
+    fi
+
+    echo "set up pxe files"
+    PXEDIR="/var/lib/tftpboot/pxelinux.cfg"
+    [ -e /var/lib/tftpboot/pxelinux.cfg ] || mkdir -p $PXEDIR
+    cp pxelinux-cfg-default ${PXEDIR}/worker
+    ln -s ${PXEDIR}/worker ${PXEDIR}/default
+    cp ${PXEDIR}/default ${PXEDIR}/bootstrap
+    sed -i s/worker.ign/bootstrap.ign/ ${PXEDIR}/bootstrap
+    ln -s ${PXEDIR}/bootstrap ${PXEDIR}/01-52-54-00-f9-8e-41
+    cp ${PXEDIR}/default ${PXEDIR}/master
+    sed -i s/worker.ign/master.ign/ ${PXEDIR}/master
+    for name in master0 master1 master2; do
+        mac=$(cat ocp4-upi-dnsmasq.conf | sed -n -r "s/dhcp-host=([^,]+).*$name/\1/p")
+        m=$(echo $mac | sed s/\:/-/g | tr '[:upper:]' '[:lower:]')
+        ln -s ${PXEDIR}/master ${PXEDIR}/01-${m}
+    done 
+
+    echo "download filetranspile"
+    [ -d ~/bin ] || mkdir ~/bin
+    wget -O ~/bin/filetranspile https://raw.githubusercontent.com/ashcrow/filetranspiler/master/filetranspile
+    chmod u+x ~/bin/filetranspile
+ 
     echo "install docker"
     if ! yum install -y podman; then
         yum install -y yum-utils device-mapper-persistent-data lvm2
@@ -156,14 +192,22 @@ popd
 
 if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
     echo "set up baremetal server ignition"
+    mkdir -p fix-ign/etc/sysconfig/network-scripts/
+    for IFNAME in "${DISABLE_IFS[@]}"; do
+        cat << EOF > lab/etc/sysconfig/network-scripts/ifcfg-${IFNAME}
+DEVICE=${IFNAME}
+BOOTPROTO=none
+ONBOOT=no
+EOF
+    done
     /usr/bin/cp -f ~/ocp4-upi-install-1/worker.ign ./ 
     /usr/bin/rm -f baremetal.ign
-    if command -v ct >/dev/null 2>&1 && [[ -d fix-ign ]]; then
-        ct -i worker.ign -f fix-ign -o baremetal.ign
+    if command -v filetranspile >/dev/null 2>&1 && [[ -d fix-ign ]]; then
+        filetranspile -i worker.ign -f fix-ign -o baremetal.ign
         /usr/bin/cp -f baremetal.ign /var/www/html/ocp4-upi
         setup_baremetal="true"
     else
-        echo "ct not installed or fix-ign directory not exist!"
+        echo "filetranspile not installed or fix-ign directory not exist!"
         echo "no baremetal ignition file generated!"
         setup_baremetal="false" 
     fi
