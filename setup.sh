@@ -137,7 +137,7 @@ EOF
     iptables -F -t nat
     iptables -X -t nat
     oif=$(ip route | sed -n -r '0,/default/s/.* dev (\w+).*/\1/p')
-    iptables -t nat -A POSTROUTING -s 192.168.222.0/24 ! -d 192.168.222.0/24 -o $(echo $oif | awk '{print $1}') -j MASQUERADE
+    iptables -t nat -A POSTROUTING -s 192.168.222.0/24 ! -d 192.168.222.0/24 -o $oif -j MASQUERADE
     
     echo "set up /etc/resolv.conf"
     sed -i 's/^search.*/search test.myocp4.com/' /etc/resolv.conf
@@ -146,8 +146,12 @@ EOF
     fi
 
     if [[ -f ${SCRIPTPATH}/ocp4-upi-dnsmasq.conf ]]; then
-        OIF=${oif} envsubst < ${SCRIPTPATH}/ocp4-upi-dnsmasq.conf >> /etc/dnsmasq.conf
+        OIF=${oif} envsubst < ${SCRIPTPATH}/ocp4-upi-dnsmasq.conf > /etc/dnsmasq.conf
     fi
+    
+    cat ~/ocp4-upi-haproxy.cfg > /etc/haproxy/haproxy.cfg
+    sed -i s/Listen\ 80/Listen\ 81/ /etc/httpd/conf/httpd.conf
+    mkdir /var/www/html/ocp4-upi
 
     if ! [[ -f ~/.ssh/id_rsa ]]; then
         ssh-keygen -f ~/.ssh/id_rsa -q -N ""
