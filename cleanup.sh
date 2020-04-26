@@ -15,7 +15,6 @@ for vol in $(virsh vol-list default | awk '/ocp4-upi/ {print $1}'); do
     virsh vol-delete $vol --pool default
 done
 
-if true; then exit 0; fi
 echo "delete VM network"
 virsh net-destroy ocp4-upi
 virsh net-undefine ocp4-upi

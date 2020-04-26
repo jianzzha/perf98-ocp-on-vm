@@ -204,7 +204,7 @@ if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
     echo "set up baremetal server ignition"
     mkdir -p fix-ign/etc/sysconfig/network-scripts/
     for IFNAME in "${DISABLE_IFS[@]}"; do
-        cat << EOF > lab/etc/sysconfig/network-scripts/ifcfg-${IFNAME}
+        cat << EOF > fix-ign/etc/sysconfig/network-scripts/ifcfg-${IFNAME}
 DEVICE=${IFNAME}
 BOOTPROTO=none
 ONBOOT=no
