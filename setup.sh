@@ -12,7 +12,7 @@ BM_IF=${BM_IF:-eno1}
 # DISABLE_IFS contains the list of devices to be disabled to prevent dhcp
 DISABLE_IFS=(eno3)
 
-MAC_BAREMETAL=52:54:00:f9:8e:00
+export MAC_BAREMETAL=52:54:00:f9:8e:00
 
 SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
@@ -136,7 +136,7 @@ EOF
     iptables -X
     iptables -F -t nat
     iptables -X -t nat
-    oif=$(ip route | sed -n -r 's/^default.* dev (\w+).*/\1/p')
+    oif=$(ip route | sed -n -r '0,/default/s/.* dev (\w+).*/\1/p')
     iptables -t nat -A POSTROUTING -s 192.168.222.0/24 ! -d 192.168.222.0/24 -o $(echo $oif | awk '{print $1}') -j MASQUERADE
     
     echo "set up /etc/resolv.conf"
@@ -157,7 +157,6 @@ EOF
 
     systemctl enable --now haproxy httpd dnsmasq
 
-    DOWNLOAD_IMAGE="true"
 fi
 
 if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
