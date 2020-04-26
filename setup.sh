@@ -179,9 +179,7 @@ if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
 fi
 
 echo "delete existing VMs"
-if virsh list | grep ocp4-upi; then
-    ./cleanup.sh
-fi
+./cleanup.sh
 
 set -ex
 echo "remove exisiting install directory"
