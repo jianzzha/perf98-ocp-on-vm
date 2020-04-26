@@ -16,6 +16,9 @@ MAC_BAREMETAL=52:54:00:f9:8e:00
 
 SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
+echo "delete existing VMs"
+./cleanup.sh
+
 if [[ "${FROM_TOP:-false}" == "true" ]]; then
     if [[ "${USE_ALIAS}" == "true" ]]; then
         ~/clean-interfaces.sh --nuke
@@ -177,9 +180,6 @@ if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
     chmod a+rx /var/www/html/ocp4-upi
     set +ex
 fi
-
-echo "delete existing VMs"
-./cleanup.sh
 
 set -ex
 echo "remove exisiting install directory"
