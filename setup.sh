@@ -164,6 +164,7 @@ if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
     [ -d ~/bin ] || mkdir ~/bin
     /bin/rm -rf ~/bin/{kubectl,oc,openshift*}
     tar -C ~/bin -xzf ~/openshift-client-linux-${VERSION}.tar.gz 
+    tar -C ~/bin -xzf ~/openshift-install-linux-${VERSION}.tar.gz
 
     baseURI=`curl -s $installerURL | jq -r '(.baseURI)'`
     bios=`curl -s $installerURL | jq -r '(.images.metal.path)'`
