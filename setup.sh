@@ -43,6 +43,8 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
     [ -e /var/lib/tftpboot/pxelinux.cfg ] || mkdir -p $PXEDIR
     cp pxelinux-cfg-default ${PXEDIR}/worker
     ln -s ${PXEDIR}/worker ${PXEDIR}/default
+    cp -s ${PXEDIR}/worker ${PXEDIR}/baremetal
+    sed -i s/worker.ign/baremetal.ign/ ${PXEDIR}/baremetal
     cp ${PXEDIR}/default ${PXEDIR}/bootstrap
     sed -i s/worker.ign/bootstrap.ign/ ${PXEDIR}/bootstrap
     ln -s ${PXEDIR}/bootstrap ${PXEDIR}/01-52-54-00-f9-8e-41
@@ -62,8 +64,8 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
     echo "install docker"
     if ! yum install -y podman; then
         yum install -y yum-utils device-mapper-persistent-data lvm2
-        yum-config-manager --add-repo   https://download.docker.com/linux/centos/docker-ce.repo
-        yum update -y && yum install -y   containerd.io-1.2.13   docker-ce-19.03.8   docker-ce-cli-19.03.8
+        yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        yum install -y containerd.io-1.2.13 docker-ce-19.03.8 docker-ce-cli-19.03.8
         mkdir /etc/docker
         cat > /etc/docker/daemon.json <<EOF
 {
@@ -83,7 +85,7 @@ EOF
         systemctl daemon-reload
         systemctl enable --now docker
     fi
-
+    systemctl enable NetworkManager --now
     nmcli con add type bridge ifname baremetal con-name baremetal ipv4.method manual ipv4.addr 192.168.222.1/24 ipv4.dns 192.168.222.1 ipv4.dns-priority 10 autoconnect yes bridge.stp no
     nmcli con reload baremetal
     nmcli con up baremetal
@@ -91,7 +93,9 @@ EOF
     if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
         git clone https://github.com/dell/iDRAC-Redfish-Scripting.git ~/Redfish
         pushd ~/Redfish/"Redfish Python"/
-        MAC_BAREMETAL=`python GetEthernetInterfacesREDFISH.py -u ${IPMI_USER} -p {IPMI_PASSWD} -ip ${IPMI_IP} -d {IPMI_PXE_DEVICE} | awk '/^MACAddress:/{print $2}'`   
+        MAC_BAREMETAL=`python GetEthernetInterfacesREDFISH.py -u ${IPMI_USER} -p {IPMI_PASSWD} -ip ${IPMI_IP} -d {IPMI_PXE_DEVICE} | awk '/^MACAddress:/{print $2}'`
+        m=$(echo ${MAC_BAREMETAL} | sed s/\:/-/g | tr '[:upper:]' '[:lower:]')
+        ln -s ${PXEDIR}/baremetal ${PXEDIR}/01-${m}
         popd
         nmcli con down $BM_IF
         nmcli con del $BM_IF
@@ -140,21 +144,22 @@ EOF
     fi
 
     if ! [[ -f ~/.ssh/id_rsa ]]; then
-        ssh-keygen -f /root/.ssh/id_rsa -q -N ""
+        ssh-keygen -f ~/.ssh/id_rsa -q -N ""
     fi
-    pub_key_content=`cat id_rsa.pub`
+    pub_key_content=`cat ~/.ssh/id_rsa.pub`
     sed -i -r -e "s/sshKey:.*/sshKey: ${pub_key_content}/" ${SCRIPTPATH}/install-config.yaml
 
     DOWNLOAD_IMAGE="true"
 fi
 
 if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
+    set -ex
     echo "download images"
 
     /bin/rm -rf ~/openshift-client-linux*
     /bin/rm -rf /var/www/html/ocp4-upi/rhcos*
 
-    wget -N -P https://mirror.openshift.com/pub/openshift-v4/clients/ocp-dev-preview/${VERSION}/{openshift-client-linux-${VERSION}.tar.gz,openshift-install-linux-${VERSION}.tar.gz}
+    wget -N -P ~ https://mirror.openshift.com/pub/openshift-v4/clients/ocp-dev-preview/${VERSION}/{openshift-client-linux-${VERSION}.tar.gz,openshift-install-linux-${VERSION}.tar.gz}
     [ -d ~/bin ] || mkdir ~/bin
     /bin/rm -rf ~/bin/{kubectl,oc,openshift*}
     tar -C ~/bin -xzf ~/openshift-client-linux-${VERSION}.tar.gz 
@@ -168,6 +173,7 @@ if [[ "${DOWNLOAD_IMAGE:-false}" == "true" ]]; then
     ln -s /var/www/html/ocp4-upi/${initramfs} /var/www/html/ocp4-upi/rhcos-installer-initramfs.img
     ln -s /var/www/html/ocp4-upi/${kernel} /var/www/html/ocp4-upi/rhcos-installer-kernel
     chmod a+rx /var/www/html/ocp4-upi
+    set +ex
 fi
 
 echo "delete existing VMs"
@@ -175,6 +181,7 @@ if virsh list | grep ocp4-upi; then
     ./cleanup.sh
 fi
 
+set -ex
 echo "remove exisiting install directory"
 rm -rf  ~/ocp4-upi-install-1
 
@@ -189,6 +196,7 @@ echo "create ignition files"
 openshift-install create ignition-configs
 /usr/bin/cp -f *.ign /var/www/html/ocp4-upi
 popd
+set +ex
 
 if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
     echo "set up baremetal server ignition"
