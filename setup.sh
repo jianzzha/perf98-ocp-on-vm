@@ -231,6 +231,8 @@ else
     setup_baremetal="false"
 fi
 
+chmod a+rx /var/www/html/ocp4-upi/*
+
 echo "start bootstrap VM ..."
 virt-install -n ocp4-upi-bootstrap --pxe --os-type=Linux --os-variant=rhel8.0 --ram=8192 --vcpus=4 --network network=ocp4-upi,mac=52:54:00:f9:8e:41 --disk size=120,bus=scsi,sparse=yes --check disk_size=off --noautoconsole
 while true; do
