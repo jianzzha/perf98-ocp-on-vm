@@ -3,10 +3,10 @@ VERSION=${VERSION:-"4.3.0-0.nightly-2020-02-06-155513"}
 installerURL=${installerURL:-"https://raw.githubusercontent.com/openshift/installer/release-4.3/data/data/rhcos.json"}
 INSTALL_BAREMETAL=${INSTALL_BAREMETAL:-false}
 USE_ALIAS=${USE_ALIAS:-false}
-IPMI_IP=mgmt-e26-h29-740xd.alias.bos.scalelab.redhat.com
-IPMI_USER=quads
-IPMI_PASSWD=504322
-IPMI_PXE_DEVICE=NIC.Integrated.1-1-1
+export IPMI_IP=mgmt-e26-h29-740xd.alias.bos.scalelab.redhat.com
+export IPMI_USER=quads
+export IPMI_PASSWD=504322
+export IPMI_PXE_DEVICE=NIC.Integrated.1-1-1
 # BM_IF is the linux name for IPMI_PXE_DEVICE
 BM_IF=${BM_IF:-eno1}
 # DISABLE_IFS contains the list of devices to be disabled to prevent dhcp
@@ -29,8 +29,9 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
     yum -y install unzip ipmitool wget virt-install jq python3 httpd syslinux-tftpboot haproxy httpd virt-install vim-enhanced git tmux
     set +ex
 
+    echo "copy extra syslinux files to tftp directory"
+    PXEDIR="/var/lib/tftpboot/pxelinux.cfg"
     if ! cat /etc/os-release | egrep 'VERSION="8'; then
-        echo "copy extra syslinux files for tftpboot" 
         yum -y unzip
         /bin/rm -rf ~/syslinux
         mkdir ~/syslinux
@@ -40,11 +41,12 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
         /bin/cp -f ./bios/core/lpxelinux.0 /var/lib/tftpboot/
         /bin/cp -f ./bios/com32/elflink/ldlinux/ldlinux.c32 /var/lib/tftpboot/
         popd
+    else
+        [ -e $PXEDIR ] || mkdir -p $PXEDIR
+        cp /tftpboot/{lpxelinux.0,ldlinux.c32} /var/lib/tftpboot/
     fi
 
     echo "set up pxe files"
-    PXEDIR="/var/lib/tftpboot/pxelinux.cfg"
-    [ -e /var/lib/tftpboot/pxelinux.cfg ] || mkdir -p $PXEDIR
     cp pxelinux-cfg-default ${PXEDIR}/worker
     ln -s ${PXEDIR}/worker ${PXEDIR}/default
     cp -s ${PXEDIR}/worker ${PXEDIR}/baremetal
@@ -99,7 +101,7 @@ EOF
     if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
         git clone https://github.com/dell/iDRAC-Redfish-Scripting.git ~/Redfish
         pushd ~/Redfish/"Redfish Python"/
-        MAC_BAREMETAL=`python GetEthernetInterfacesREDFISH.py -u ${IPMI_USER} -p {IPMI_PASSWD} -ip ${IPMI_IP} -d {IPMI_PXE_DEVICE} | awk '/^MACAddress:/{print $2}'`
+        MAC_BAREMETAL=`python GetEthernetInterfacesREDFISH.py -u ${IPMI_USER} -p ${IPMI_PASSWD} -ip ${IPMI_IP} -d ${IPMI_PXE_DEVICE} | awk '/^MACAddress:/{print $2}'`
         m=$(echo ${MAC_BAREMETAL} | sed s/\:/-/g | tr '[:upper:]' '[:lower:]')
         ln -s ${PXEDIR}/baremetal ${PXEDIR}/01-${m}
         popd
@@ -151,7 +153,7 @@ EOF
     
     cat ${SCRIPTPATH}/ocp4-upi-haproxy.cfg > /etc/haproxy/haproxy.cfg
     sed -i s/Listen\ 80/Listen\ 81/ /etc/httpd/conf/httpd.conf
-    mkdir /var/www/html/ocp4-upi
+    mkdir -p /var/www/html/ocp4-upi
 
     if ! [[ -f ~/.ssh/id_rsa ]]; then
         ssh-keygen -f ~/.ssh/id_rsa -q -N ""
@@ -204,6 +206,12 @@ echo "create ignition files"
 openshift-install create ignition-configs
 /usr/bin/cp -f *.ign /var/www/html/ocp4-upi
 popd
+
+echo "setup kube link"
+[ -d ~/.kube ] || mkdir -p ~/.kube
+[ -L ~/.kube/config ] && /bin/rm -rf ~/.kube/config
+[ -e ~/.kube/config ] && /bin/mv -f ~/.kube/config ~/.kube/config.bak
+ln -s ~/ocp4-upi-install-1/auth/kubeconfig ~/.kube/config
 set +ex
 
 if [[ "${INSTALL_BAREMETAL}" == "true" ]]; then
@@ -300,7 +308,7 @@ echo "update bios pxe device order"
 pushd ~/Redfish/"Redfish Python"/
 python GetBiosBootOrderBootSourceStateREDFISH.py -u ${IPMI_USER} -p ${IPMI_PASSWD} -ip ${IPMI_IP} 
 /bin/cp -f ${SCRIPTPATH}/redfish_update_pxe.py ./
-python redfish_update_pxe.p $IPMI_PXE_DEVICE
+python redfish_update_pxe.py $IPMI_PXE_DEVICE
 python ChangeBootOrderBootSourceStateREDFISH.py -u ${IPMI_USER} -p ${IPMI_PASSWD} -ip ${IPMI_IP}
 popd
 
