@@ -47,14 +47,14 @@ if [[ "${FROM_TOP:-false}" == "true" ]]; then
     fi
 
     echo "set up pxe files"
-    cp pxelinux-cfg-default ${PXEDIR}/worker
+    /bin/cp -f pxelinux-cfg-default ${PXEDIR}/worker
     ln -s ${PXEDIR}/worker ${PXEDIR}/default
-    cp -s ${PXEDIR}/worker ${PXEDIR}/baremetal
+    /bin/cp -f ${PXEDIR}/worker ${PXEDIR}/baremetal
     sed -i s/worker.ign/baremetal.ign/ ${PXEDIR}/baremetal
-    cp ${PXEDIR}/default ${PXEDIR}/bootstrap
+    /bin/cp -f ${PXEDIR}/default ${PXEDIR}/bootstrap
     sed -i s/worker.ign/bootstrap.ign/ ${PXEDIR}/bootstrap
     ln -s ${PXEDIR}/bootstrap ${PXEDIR}/01-52-54-00-f9-8e-41
-    cp ${PXEDIR}/default ${PXEDIR}/master
+    /bin/cp -f ${PXEDIR}/default ${PXEDIR}/master
     sed -i s/worker.ign/master.ign/ ${PXEDIR}/master
     for name in master0 master1 master2; do
         mac=$(cat ocp4-upi-dnsmasq.conf | sed -n -r "s/dhcp-host=([^,]+).*$name/\1/p")
